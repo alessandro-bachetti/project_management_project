@@ -1,5 +1,5 @@
 #####################################
-# 1. DATA CLEANING AND PREPARATION 
+# 1. DATA CLEANING AND PREPARATION
 #####################################
 library(tidyverse)
 library(nnet)       # Per il modello multinomiale
@@ -10,7 +10,7 @@ library(openxlsx)
 ### PROVARE A RIDURRE CODICE CON TIDYVERSE
 
 # Prepare the environment
-rm(list=ls())
+rm(list = ls())
 library(rstudioapi)
 current_path <- getActiveDocumentContext()$path
 setwd(dirname(current_path))
@@ -18,8 +18,7 @@ print(getwd())
 
 # Load data
 
-data=read.csv("project_risk_raw_dataset.csv",  row.names = 1)
-#View(data)
+data <- read.csv("project_risk_raw_dataset.csv",  row.names = 1)
 
 # Check the data
 head(data)
@@ -53,13 +52,14 @@ table(data$Change_Control_Maturity, useNA = "ifany")
 table(data$Risk_Management_Maturity, useNA = "ifany")
 
 # Critical: 355 High: 642 Low: 697 Medium: 1007
-# The result of removing missing values was either a small (1000 obs) or an imbalanced dataset 
-# that is why we opted for removing the 3 columns 
+# The result of removing missing values was either a small (1000 obs)
+# or an imbalanced dataset
+# that is why we opted for removing the 3 columns
 
 data$Tech_Environment_Stability <- NULL
 data$Change_Control_Maturity <- NULL
 data$Risk_Management_Maturity <- NULL
-# data[,names(data_clean)c("Risk_Management_Maturity","Change_Control_Maturity","")]
+
 
 data_clean <- na.omit(data)
 sum(is.na(data_clean))
@@ -71,13 +71,12 @@ table(data_clean$Risk_Level)
 num_vars <- names(data_clean)[sapply(data_clean, is.numeric)]
 
 # Categorical variables (character or factor type)
-cat_vars <- names(data_clean)[sapply(data_clean, function(x) is.character(x) | is.factor(x))]
+cat_vars <- names(data_clean)[sapply(data_clean,function(x) is.character(x) | is.factor(x))]
 
 # Convert them to factors
 data_clean[cat_vars] <- lapply(data_clean[cat_vars], as.factor)
 
 str(data_clean)
-#View(data_clean)
 
 # check which scaling to apply
 
@@ -90,7 +89,7 @@ data_clean$Risk_Level <- relevel(data_clean$Risk_Level, ref = "Low")
 
 
 # A. Creiamo il "Modello Pieno" con tutte le variabili
-full_model <- multinom(Risk_Level ~ ., data = data_clean, trace = FALSE, contrasts = NULL, model = T)
+full_model <- multinom(Risk_Level ~ ., data = data_clean, trace = FALSE, contrasts = NULL, model = TRUE)
 
 # B. Eseguiamo la selezione Stepwise
 # direction = "both" prova sia ad aggiungere che a togliere variabili
@@ -101,7 +100,7 @@ print(formula(step_model))
 
 # --- 3. MODELLO FINALE ---
 # Il 'step_model' è già il modello ottimizzato, ma lo rifacciamo pulito
-final_model <- step_model 
+final_model <- step_model
 
 # --- 4. TEST DIAGNOSTICI SUL MODELLO ---
 
