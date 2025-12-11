@@ -1,41 +1,93 @@
+#####################################
+# 1. DATA CLEANING AND PREPARATION 
+#####################################
+
+### PROVARE A RIDURRE CODICE CON TIDYVERSE
+
+# Prepare the environment
 rm(list=ls())
-library(rstudioapi) # load it
-# the following line is for getting the path of your current open file
-current_path <- getActiveDocumentContext()$path 
-# The next line set the working directory to the relevant one:
-setwd(dirname(current_path ))
-# you can make sure you are in the right directory
-print( getwd() )
+library(rstudioapi)
+current_path <- getActiveDocumentContext()$path
+setwd(dirname(current_path))
+print(getwd())
 
-library(tidyverse)
-library(nnet)       # Per il modello multinomiale
-library(MASS)       # Per la selezione Stepwise (stepAIC)
-library(car)        # Per il test di Multicollinearità (VIF)
-library(DescTools)  # Per il Pseudo R-Squared
+# Load data
+library(openxlsx)
+data=read.csv("project_risk_raw_dataset.csv",  row.names = 1)
+View(data)
 
-# --- 1. PREPARAZIONE DATI ---
-df <- readr::read_csv("project_risk_raw_dataset.csv", na=c("N/A", "NA", "None", ""))
+# Check the data
+head(data)
+str(data)
+summary(data)
+
+# Missing values
+sum(is.na(data))
+unique(data$Tech_Environment_Stability)
+unique(data$Change_Control_Maturity)
+unique(data$Risk_Management_Maturity)
+
+placeholders <- c("N/A", "NA", "None", "")
+
+data$Tech_Environment_Stability[
+  data$Tech_Environment_Stability %in% placeholders
+] <- NA
+
+data$Change_Control_Maturity[
+  data$Change_Control_Maturity %in% placeholders
+] <- NA
+
+data$Risk_Management_Maturity[
+  data$Risk_Management_Maturity %in% placeholders
+] <- NA
+
+sum(is.na(data))
+
+table(data$Tech_Environment_Stability, useNA = "ifany")
+table(data$Change_Control_Maturity, useNA = "ifany")
+table(data$Risk_Management_Maturity, useNA = "ifany")
+
+# Critical: 355 High: 642 Low: 697 Medium: 1007
+# The result of removing missing values was either a small (1000 obs) or an imbalanced dataset 
+# that is why we opted for removing the 3 columns 
+
+data$Tech_Environment_Stability <- NULL
+data$Change_Control_Maturity <- NULL
+data$Risk_Management_Maturity <- NULL
+# data[,names(data_clean)c("Risk_Management_Maturity","Change_Control_Maturity","")]
+
+data_clean <- na.omit(data)
+sum(is.na(data_clean))
+nrow(data_clean)
+table(data_clean$Risk_Level)
+
+
+# Numeric variables
+num_vars <- names(data_clean)[sapply(data_clean, is.numeric)]
+
 # Categorical variables (character or factor type)
-cat_vars <- names(df)[sapply(df, function(x) is.character(x) | is.factor(x))]
+cat_vars <- names(data_clean)[sapply(data_clean, function(x) is.character(x) | is.factor(x))]
 
 # Convert them to factors
-df[cat_vars] <- lapply(df[cat_vars], as.factor)
-df <- na.omit(df) # Rimuoviamo i NA per semplicità
-df$Project_ID <- NULL # Rimuoviamo l'ID
+data_clean[cat_vars] <- lapply(data_clean[cat_vars], as.factor)
 
-# Standardizzazione (Necessaria per la regressione logistica)
-nums <- unlist(lapply(df, is.numeric))
-df_scaled <- df
-df_scaled[,nums] <- scale(df[,nums])
+str(data_clean)
+View(data_clean)
+
+# check which scaling to apply
+
+data_clean[num_vars] <- scale(data_clean[num_vars])
+
+str(data_clean)
 
 # Impostiamo "Low" come riferimento
-df_scaled$Risk_Level <- relevel(df_scaled$Risk_Level, ref = "Low")
+data_clean$Risk_Level <- relevel(data_clean$Risk_Level, ref = "Low")
 
 # --- 2. SELEZIONE DELLE VARIABILI (STEPWISE AIC) ---
 cat("\n--- Inizio Selezione Variabili (Stepwise Backward) ---\n")
 
 # A. Creiamo il "Modello Pieno" con tutte le variabili
-full_model <- multinom(Risk_Level ~ ., data = df_scaled, trace = FALSE, contrasts = NULL)
+full_model <- multinom(Risk_Level ~ ., data = data_clean, trace = FALSE, contrasts = NULL)
 
 # B. Eseguiamo la selezione Stepwise
 # direction = "both" prova sia ad aggiungere che a togliere variabili
@@ -60,7 +112,7 @@ print(r2)
 
 # TEST C: Likelihood Ratio Test (Significatività Globale)
 # Confronta il nostro modello con un modello nullo (che tira a indovinare)
-null_model <- multinom(Risk_Level ~ 1, data = df_scaled, trace = FALSE)
+null_model <- multinom(Risk_Level ~ 1, data = data_clean, trace = FALSE)
 lr_test <- anova(null_model, final_model)
 
 cat("\n--- Likelihood Ratio Test (Il modello serve a qualcosa?) ---\n")
