@@ -1,7 +1,12 @@
 #####################################
 # 1. DATA CLEANING AND PREPARATION 
 #####################################
-
+library(tidyverse)
+library(nnet)       # Per il modello multinomiale
+library(MASS)       # Per la selezione Stepwise (stepAIC)
+library(car)        # Per il test di Multicollinearità (VIF)
+library(DescTools)  # Per il Pseudo R-Squared
+library(openxlsx)
 ### PROVARE A RIDURRE CODICE CON TIDYVERSE
 
 # Prepare the environment
@@ -12,9 +17,9 @@ setwd(dirname(current_path))
 print(getwd())
 
 # Load data
-library(openxlsx)
+
 data=read.csv("project_risk_raw_dataset.csv",  row.names = 1)
-View(data)
+#View(data)
 
 # Check the data
 head(data)
@@ -72,7 +77,7 @@ cat_vars <- names(data_clean)[sapply(data_clean, function(x) is.character(x) | i
 data_clean[cat_vars] <- lapply(data_clean[cat_vars], as.factor)
 
 str(data_clean)
-View(data_clean)
+#View(data_clean)
 
 # check which scaling to apply
 
@@ -83,18 +88,15 @@ str(data_clean)
 # Impostiamo "Low" come riferimento
 data_clean$Risk_Level <- relevel(data_clean$Risk_Level, ref = "Low")
 
-# --- 2. SELEZIONE DELLE VARIABILI (STEPWISE AIC) ---
-cat("\n--- Inizio Selezione Variabili (Stepwise Backward) ---\n")
 
 # A. Creiamo il "Modello Pieno" con tutte le variabili
-full_model <- multinom(Risk_Level ~ ., data = data_clean, trace = FALSE, contrasts = NULL)
+full_model <- multinom(Risk_Level ~ ., data = data_clean, trace = FALSE, contrasts = NULL, model = T)
 
 # B. Eseguiamo la selezione Stepwise
 # direction = "both" prova sia ad aggiungere che a togliere variabili
 # trace = 0 nasconde il log lungo, mettilo a 1 se vuoi vedere i passaggi
 step_model <- stepAIC(full_model, direction = "both", trace = 0)
 
-cat("Variabili selezionate automaticamente:\n")
 print(formula(step_model))
 
 # --- 3. MODELLO FINALE ---
@@ -109,6 +111,12 @@ r2 <- PseudoR2(final_model, which = "McFadden")
 cat("\n--- Bontà del Modello (McFadden R2) ---\n")
 print(r2)
 # Interpretazione: 0.2-0.4 è eccellente per dati reali. < 0.1 è scarso.
+
+# TEST B: Test di Multicollinearità (VIF)
+# Controlliamo se le variabili rimaste sono troppo simili tra loro
+# Nota: VIF si calcola meglio su un modello lineare proxy, poiché multinom è complesso
+proxy_model <- lm(as.numeric(Risk_Level) ~ ., data = df_scaled[, -which(names(df_scaled) == "Risk_Level")])
+vif_values <- vif(proxy_model)
 
 # TEST C: Likelihood Ratio Test (Significatività Globale)
 # Confronta il nostro modello con un modello nullo (che tira a indovinare)
