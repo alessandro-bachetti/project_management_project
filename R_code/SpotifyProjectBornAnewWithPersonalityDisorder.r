@@ -7,6 +7,13 @@ library(readr)
 library(MASS)
 library(ggplot2)
 
+# Prepare the environment
+rm(list = ls())
+library(rstudioapi)
+current_path <- getActiveDocumentContext()$path
+setwd(dirname(current_path))
+print(getwd())
+
 # Funzione per calcolare la moda (per categoriche)
 getmode <- function(v) {
    uniqv <- unique(na.omit(v))
@@ -16,7 +23,7 @@ getmode <- function(v) {
 # --- 2. CARICAMENTO DATI E PULIZIA BASE ---
 df <- read_csv("project_risk_raw_dataset.csv")
 
-# Rimozione Project_ID
+# Rimozione Project_ID ###corregere
 if ("Project_ID" %in% names(df)) {
     df <- df[, names(df) != "Project_ID"]
 }
@@ -57,19 +64,30 @@ cat("Imputazione e Scalatura completate. NA rimasti:", sum(is.na(df)), "\n")
 # --- 4. FEATURE SELECTION (Usando i dati SCALATI) ---
 # Selezioniamo le variabili migliori come fatto in precedenza
 num_cols_scalate <- names(df)[sapply(df, is.numeric)]
+
+### Correlation Matrix da fare e pulizia delle le variabili a priori su base corr###
+
+
 p_vals_num <- sapply(num_cols_scalate, function(x) {
   summary(aov(df[[x]] ~ df[[target_col]]))[[1]][["Pr(>F)"]][1]
 })
-top_numeric <- names(sort(p_vals_num)[1:5])
+
+#pca per confronto ad ANOVA/Sostituzione di ANOVA -> Uso pca per selection 
+
+top_numeric <- names(sort(p_vals_num)[1:6])
 
 cat_cols <- names(df)[sapply(df, is.factor)]
 cat_cols <- cat_cols[cat_cols != target_col]
+
+###vedi  con V-Cramer TRA LE VARIABILI A MO' DI CORR-MATRIX per pulizia
+### e chi-quadro per selezione
+
 p_vals_cat <- sapply(cat_cols, function(x) {
   tryCatch({
     chisq.test(table(df[[x]], df[[target_col]]))$p.value
   }, error = function(e) { 1 })
 })
-top_categorical <- names(sort(p_vals_cat)[1:3])
+top_categorical <- names(sort(p_vals_cat)[1:6])
 
 final_vars <- c(target_col, top_numeric, top_categorical)
 
@@ -120,6 +138,8 @@ cat("\n\n#####################################################")
 cat("\n## MODELLO B: LINEAR DISCRIMINANT ANALYSIS (dati SCALATI) ##")
 cat("\n#####################################################\n")
 
+#questo non so che fare, integra con codice Silvia
+
 # B1. Preparazione Dati per LDA: crea le dummy esplicite
 formula_lda <- as.formula(paste("~", paste(c(top_numeric, top_categorical), collapse = " + ")))
 X_matrix <- model.matrix(formula_lda, data = df_model)[,-1] 
@@ -168,3 +188,4 @@ cat("Accuratezza Logistica Multinomiale:", round(acc_log, 4), "\n")
 cat("Accuratezza LDA:", round(acc_lda, 4), "\n")
 cat("============================================\n")
 
+#logit binaria e lda binaria e confronto risultati
