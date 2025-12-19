@@ -4,6 +4,7 @@
 rm(list = ls())
 library(rstudioapi)
 library(nnet)
+library(car) # corr matrix
 library(caret) 
 library(dplyr) 
 library(readr)
@@ -53,6 +54,7 @@ num_vars <- names(df)[sapply(df, is.numeric)]
 
 # 3.1 Pulizia a priori: Correlazione (> 0.7)
 cor_mat <- cor(df[num_vars])
+corrplot(cor_mat, type = "upper", method = "ellipse", tl.cex = 0.9)
 high_corr <- findCorrelation(cor_mat, cutoff = 0.7, names = TRUE)
 num_vars_filtered <- setdiff(num_vars, high_corr)
 
@@ -86,6 +88,16 @@ if(length(cat_vars) > 1) {
   }
 }
 
+corrplot(v_val,
+         type = "upper",
+         method = "color",
+         col = colorRampPalette(c("white", "blue"))(200),
+         tl.cex = 0.8,
+         addCoef.col = "black",
+         number.cex = 0.5,
+         diag = FALSE,
+         cl.lim = c(0, 1))
+
 # 4.2 Selezione Chi-Quadro (Top 5 rispetto al Target)
 p_vals_chi <- sapply(to_keep_cat, function(x) {
   chisq.test(table(df[[x]], df[[target_col]]))$p.value
@@ -107,10 +119,16 @@ data_test  <- df_model[-trainIndex,]
 # Logit Multinomiale
 m_logit <- multinom(Risk_Level ~ ., data = data_train, trace = FALSE)
 acc_logit <- confusionMatrix(predict(m_logit, data_test), data_test[[target_col]])$overall['Accuracy']
+vif(m_logit)
 
 # LDA Multinomiale
 m_lda <- lda(Risk_Level ~ ., data = data_train)
 acc_lda <- confusionMatrix(predict(m_lda, data_test)$class, data_test[[target_col]])$overall['Accuracy']
+
+# Plot LDA Multinomiale
+lda_p <- predict(m_lda, data_test)
+lda_df <- data.frame(Risk = data_test$Risk_Level, lda_p$x)
+ggplot(lda_df, aes(x=LD1, y=LD2, color=Risk)) + geom_point() + stat_ellipse() + theme_minimal()
 
 #####################################################
 # 6. MODELLI BINARI (Low/Med=0, High/Crit=1)
@@ -126,6 +144,7 @@ m_logit_bin <- glm(Risk_Binary ~ . - Risk_Level, data = data_train_bin, family =
 prob_logit <- predict(m_logit_bin, data_test_bin, type = "response")
 pred_logit_bin <- factor(ifelse(prob_logit > 0.5, 1, 0), levels = c(0, 1))
 acc_logit_bin <- confusionMatrix(pred_logit_bin, data_test_bin$Risk_Binary)$overall['Accuracy']
+vif(m_logit_bin)
 
 # 6.2 LDA Binaria
 m_lda_bin <- lda(Risk_Binary ~ . - Risk_Level, data = data_train_bin)
@@ -150,18 +169,3 @@ cat("\nAUC Modello Binario:", round(auc_val, 4), "\n")
 # Plot ROC
 plot(roc_obj, main = paste("ROC Curve (AUC =", round(auc_val, 3), ")"), col = "blue")
 
-
-# Plot LDA Multinomiale
-lda_p <- predict(m_lda, data_test)
-lda_df <- data.frame(Risk = data_test$Risk_Level, lda_p$x)
-ggplot(lda_df, aes(x=LD1, y=LD2, color=Risk)) + geom_point() + stat_ellipse() + theme_minimal()
-###aggiungere plot lda binaria
-# Plot LDA Binaria
-lda_p_bin <- predict(m_lda_bin, data_test_bin)
-# In LDA binaria abbiamo solo 1 discriminante (LD1)
-lda_df_bin <- data.frame(Risk = data_test_bin$Risk_Binary, LD1 = lda_p_bin$x)
-
-ggplot(lda_df_bin, aes(x=LD1, fill=Risk)) +
-  geom_density(alpha=0.5) +
-  labs(title="Distribuzione LD1 - Modello Binario", x="Linear Discriminant 1", fill="Rischio") +
-  theme_minimal()
