@@ -10,6 +10,7 @@ library(dplyr)
 library(readr)
 library(MASS)
 library(ggplot2)
+library(patchwork)
 library(corrplot)
 library(vcd)       # Per V-Cramer
 library(factoextra) # Per PCA visualization
@@ -28,10 +29,10 @@ getmode <- function(v) {
 }
 
 #####################################################
-# 2. DATA CLEANING & IMPUTATION
+# 2. DATA CLEANING & IMPUTATION + OOVERALL EDA
 #####################################################
 
-# Ciclo for per imputazione (Moda/Mediana)
+# Ciclo for per imputazione (Moda/Mediana) + scaling
 target_col <- "Risk_Level"
 for (col in names(df)) {
   if (col != target_col) {
@@ -47,48 +48,116 @@ for (col in names(df)) {
 
 df[[target_col]] <- factor(df[[target_col]], levels = c("Low", "Medium", "High", "Critical"))
 
+
+
+# Numercial variables plots
+num_vars <- names(df)[sapply(df, is.numeric)]
+
+numeric_plots <- lapply(num_vars, function(var) {
+  ggplot(df, aes(x = .data[[var]])) +
+    geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+    theme_minimal() +
+    labs(title = var)
+})
+
+# Combine all plots into a grid
+final_numeric_plot <- wrap_plots(numeric_plots, ncol = 5)
+#ggsave("numeric_plots.png", final_numeric_plot, width = 20, height = 15, units = "in", dpi = 300) 
+
+box_plots <- lapply(num_vars, function(var) {
+  ggplot(df, aes(x = .data[[var]])) +
+    geom_boxplot(fill = "lightgreen") +
+    theme_minimal() +
+    labs(title = var)
+})
+
+# Combine into a grid
+final_boxplot <- wrap_plots(box_plots, ncol = 5)
+#ggsave("All_Boxplots.png", final_boxplot, width = 20, height = 15, dpi = 300)
+
+
+# Categorical plots
+cat_vars <- names(df)[sapply(df, is.factor)]
+cat_vars <- cat_vars[cat_vars != target_col]
+
+categorical_plots <- lapply(cat_vars, function(var) {
+  ggplot(df, aes(x = .data[[var]])) +
+    geom_bar(fill = "coral") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = var)
+})
+
+
+# Combine all plots into a grid
+final_cat_plot <- wrap_plots(categorical_plots, ncol = 5)
+ggsave("categorical_plots.png", final_cat_plot, width = 20, height = 15, units = "in", dpi = 300)
+
+
 #####################################################
 # 3. FEATURE SELECTION (NUMERICHE: CORR, ANOVA, PCA)
 #####################################################
-num_vars <- names(df)[sapply(df, is.numeric)]
+
 
 # 3.1 Pulizia a priori: Correlazione (> 0.7)
 cor_mat <- cor(df[num_vars])
 corrplot(cor_mat, type = "upper", method = "ellipse", tl.cex = 0.9)
 high_corr <- findCorrelation(cor_mat, cutoff = 0.7, names = TRUE)
+print(high_corr)
 num_vars_filtered <- setdiff(num_vars, high_corr)
 
-# 3.2 Selezione ANOVA (Top 5)
+# 3.2 Selezione ANOVA (Top 5) 
 p_vals_anova <- sapply(num_vars_filtered, function(x) {
   summary(aov(df[[x]] ~ df[[target_col]]))[[1]][["Pr(>F)"]][1]
 })
 top_anova <- names(sort(p_vals_anova)[1:5])
-
+print(top_anova)
 # 3.3 Selezione PCA (Top 5 basate su contribuzione PC1 e PC2)
 pca_res <- princomp(df[num_vars_filtered], cor = TRUE)
+print(summary(pca_res), loading = TRUE)
+
+# Control variable colors using their contributions to the principle axis
+fviz_pca_var(pca_res, col.var = "contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE # Avoid text overlapping
+) + theme_minimal() + ggtitle("Variables - PCA")
+
+
+fviz_contrib(pca_res, choice = "var", axes = 1, top = 10) 
+fviz_contrib(pca_res, choice = "var", axes = 2, top = 10)
+fviz_contrib(pca_res, choice = "var", axes = 3, top = 10)
+
 contributions <- rowSums(pca_res$loadings[, 1:2]^2)
 top_pca <- names(sort(contributions, decreasing = TRUE)[1:5])
+print(top_pca)
 
 final_num_vars <- unique(c(top_anova, top_pca))
+print(final_num_vars)
 
 #####################################################
 # 4. FEATURE SELECTION (CATEGORICHE: V-CRAMER, CHI-SQ)
 #####################################################
-cat_vars <- names(df)[sapply(df, is.factor)]
-cat_vars <- cat_vars[cat_vars != target_col]
 
 # 4.1 Pulizia V-Cramer (rimozione ridondanti tra loro)
-to_keep_cat <- cat_vars
-if(length(cat_vars) > 1) {
-  for(i in 1:(length(cat_vars)-1)) {
-    for(j in (i+1):length(cat_vars)) {
-      v_val <- assocstats(table(df[[cat_vars[i]]], df[[cat_vars[j]]]))$cramer
-      if(!is.na(v_val) && v_val > 0.7) to_keep_cat <- setdiff(to_keep_cat, cat_vars[j])
+
+# Create empty matrix
+n <- length(cat_vars)
+cramer_matrix <- matrix(NA, nrow = n, ncol = n,
+                        dimnames = list(cat_vars, cat_vars))
+
+# Loop through all pairs
+for(i in 1:n){
+  for(j in 1:n){
+    if (i != j) {
+      tab <- table(df[[cat_vars[i]]], df[[cat_vars[j]]])
+      cramer_matrix[i, j] <- assocstats(tab)$cramer
+    } else {
+      cramer_matrix[i, j] <- 1   # variable with itself
     }
   }
 }
 
-corrplot(v_val,
+corrplot(cramer_matrix,
          type = "upper",
          method = "color",
          col = colorRampPalette(c("white", "blue"))(200),
@@ -98,11 +167,24 @@ corrplot(v_val,
          diag = FALSE,
          cl.lim = c(0, 1))
 
+to_keep_cat <- cat_vars
+if(length(cat_vars) > 1) {
+  for(i in 1:(length(cat_vars)-1)) {
+    for(j in (i+1):length(cat_vars)) {
+      v_val <- assocstats(table(df[[cat_vars[i]]], df[[cat_vars[j]]]))$cramer
+      if(!is.na(v_val) && v_val > 0.3) to_keep_cat <- setdiff(to_keep_cat, cat_vars[j])
+    }
+  }
+}
+
+print(to_keep_cat)
+
 # 4.2 Selezione Chi-Quadro (Top 5 rispetto al Target)
 p_vals_chi <- sapply(to_keep_cat, function(x) {
   chisq.test(table(df[[x]], df[[target_col]]))$p.value
 })
 top_categorical <- names(sort(p_vals_chi)[1:5])
+print(top_categorical)
 
 # Dataset finale per i modelli
 final_vars <- c(target_col, final_num_vars, top_categorical)
@@ -143,7 +225,12 @@ data_test_bin  <- df_model[-trainIndex,]
 m_logit_bin <- glm(Risk_Binary ~ . - Risk_Level, data = data_train_bin, family = binomial)
 prob_logit <- predict(m_logit_bin, data_test_bin, type = "response")
 pred_logit_bin <- factor(ifelse(prob_logit > 0.5, 1, 0), levels = c(0, 1))
+
+print(confusionMatrix(pred_logit_bin, data_test_bin$Risk_Binary))
 acc_logit_bin <- confusionMatrix(pred_logit_bin, data_test_bin$Risk_Binary)$overall['Accuracy']
+nullmod <- glm(Risk_Binary~1, data = data_train_bin,family=binomial(link="logit"))
+mf_r2 = 1-(-2)*logLik(m_logit_bin)/(-2*logLik(nullmod))
+print(mf_r2)
 vif(m_logit_bin)
 
 # 6.2 LDA Binaria
@@ -154,7 +241,6 @@ acc_lda_bin <- confusionMatrix(pred_lda_bin$class, data_test_bin$Risk_Binary)$ov
 # 6.3 Analisi ROC/AUC (Logit Binaria)
 roc_obj <- roc(data_test_bin$Risk_Binary, prob_logit)
 auc_val <- auc(roc_obj)
-
 #####################################################
 # 7. CONFRONTO E OUTPUT
 #####################################################
